@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TraceLite — Distributed Tracing from Scratch</title>
+<meta name="description" content="A distributed tracing system built entirely from scratch in Python. Zero dependencies, W3C compliant, 193 tests.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Geist:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper:    oklch(13% 0.010 250);
+    --paper-2:  oklch(16% 0.012 250);
+    --paper-3:  oklch(20% 0.010 250);
+    --rule:     oklch(28% 0.008 250);
+    --neutral:  oklch(55% 0.008 250);
+    --muted:    oklch(70% 0.006 250);
+    --ink:      oklch(93% 0.006 250);
+    --accent:   oklch(72% 0.18 155);
+    --accent-dim: oklch(55% 0.12 155);
+    --error:    oklch(65% 0.18 25);
+    --warn:     oklch(78% 0.14 85);
+    --font-display: 'Space Grotesk', system-ui, sans-serif;
+    --font-body: 'Geist', system-ui, sans-serif;
+    --mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html { font-size: 16px; scroll-behavior: smooth; }
+
+  body {
+    font-family: var(--font-body);
+    font-weight: 350;
+    background: var(--paper);
+    color: var(--ink);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* === Header === */
+  .header {
+    padding: 2.5rem 2rem 1.5rem;
+    max-width: 960px;
+    margin: 0 auto;
+  }
+
+  .header h1 {
+    font-family: var(--font-display);
+    font-size: 1.25rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--ink);
+  }
+
+  .header h1 span {
+    color: var(--accent);
+  }
+
+  .header p {
+    color: var(--muted);
+    font-size: 0.875rem;
+    margin-top: 0.35rem;
+  }
+
+  /* === Screenshot frame sections === */
+  .frame-section {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 2.5rem 2rem;
+  }
+
+  .frame-caption {
+    font-family: var(--font-display);
+    font-size: 0.95rem;
+    font-weight: 500;
+    color: var(--muted);
+    margin-bottom: 1rem;
+    letter-spacing: 0.01em;
+  }
+
+  .frame-caption strong {
+    color: var(--ink);
+    font-weight: 600;
+  }
+
+  .frame {
+    background: var(--paper-2);
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .frame-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 14px;
+    background: var(--paper-3);
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .frame-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--rule);
+  }
+
+  .frame-bar .tab {
+    margin-left: 12px;
+    font-size: 0.75rem;
+    color: var(--neutral);
+    font-family: var(--mono);
+  }
+
+  .frame-body {
+    padding: 1.5rem;
+    overflow-x: auto;
+  }
+
+  /* Code blocks */
+  pre {
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    line-height: 1.7;
+    color: var(--ink);
+    white-space: pre;
+    tab-size: 4;
+  }
+
+  .kw { color: oklch(72% 0.12 300); }
+  .fn { color: oklch(75% 0.14 210); }
+  .str { color: var(--accent); }
+  .cm { color: var(--neutral); font-style: italic; }
+  .num { color: var(--warn); }
+  .op { color: var(--muted); }
+  .attr { color: oklch(78% 0.10 60); }
+  .err { color: var(--error); }
+
+  /* === Waterfall diagram === */
+  .waterfall {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 0.5rem 0;
+  }
+
+  .wf-row {
+    display: grid;
+    grid-template-columns: 180px 1fr 80px;
+    align-items: center;
+    gap: 12px;
+    font-family: var(--mono);
+    font-size: 0.75rem;
+  }
+
+  .wf-label {
+    color: var(--muted);
+    text-align: right;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .wf-bar-container {
+    height: 22px;
+    position: relative;
+    background: oklch(18% 0.006 250);
+    border-radius: 3px;
+  }
+
+  .wf-bar {
+    position: absolute;
+    height: 100%;
+    border-radius: 3px;
+    min-width: 3px;
+  }
+
+  .wf-bar.svc-gateway { background: var(--accent); }
+  .wf-bar.svc-user    { background: oklch(68% 0.14 210); }
+  .wf-bar.svc-db      { background: oklch(72% 0.12 300); }
+  .wf-bar.svc-error   { background: var(--error); }
+
+  .wf-dur {
+    color: var(--neutral);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* === Stats row === */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .stat {
+    background: var(--paper-2);
+    padding: 1.25rem 1rem;
+  }
+
+  .stat-value {
+    font-family: var(--font-display);
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .stat-value .unit {
+    font-size: 0.875rem;
+    font-weight: 400;
+    color: var(--neutral);
+    margin-left: 2px;
+  }
+
+  .stat-label {
+    font-size: 0.75rem;
+    color: var(--neutral);
+    margin-top: 0.25rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  /* === Service graph === */
+  .graph-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 2rem;
+    padding: 1rem 0;
+    flex-wrap: wrap;
+  }
+
+  .graph-node {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .graph-box {
+    width: 110px;
+    padding: 0.75rem;
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    background: var(--paper-3);
+    text-align: center;
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    color: var(--ink);
+  }
+
+  .graph-box small {
+    display: block;
+    color: var(--neutral);
+    font-size: 0.65rem;
+    margin-top: 0.25rem;
+  }
+
+  .graph-arrow {
+    color: var(--neutral);
+    font-size: 1.25rem;
+    font-family: var(--mono);
+  }
+
+  /* === Feature list === */
+  .features {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .feature {
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid var(--rule);
+    font-size: 0.85rem;
+  }
+
+  .feature:nth-child(odd) {
+    border-right: 1px solid var(--rule);
+  }
+
+  .feature:nth-last-child(-n+2) {
+    border-bottom: none;
+  }
+
+  .feature-name {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 0.8rem;
+    margin-bottom: 0.2rem;
+  }
+
+  .feature-desc {
+    color: var(--neutral);
+    font-size: 0.8rem;
+    line-height: 1.4;
+  }
+
+  /* === CTA bar === */
+  .cta-bar {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 2.5rem 2rem 4rem;
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+  }
+
+  .cta-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.65rem 1.5rem;
+    background: var(--accent);
+    color: oklch(16% 0.01 250);
+    font-family: var(--font-display);
+    font-size: 0.85rem;
+    font-weight: 600;
+    border-radius: 6px;
+    text-decoration: none;
+    transition: opacity 0.15s;
+  }
+
+  .cta-btn:hover { opacity: 0.85; }
+
+  .cta-secondary {
+    color: var(--muted);
+    font-size: 0.8rem;
+    text-decoration: none;
+    border-bottom: 1px solid var(--rule);
+    padding-bottom: 1px;
+    transition: color 0.15s;
+  }
+
+  .cta-secondary:hover { color: var(--ink); }
+
+  /* === Footer === */
+  footer {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 2rem;
+    border-top: 1px solid var(--rule);
+    color: var(--neutral);
+    font-size: 0.75rem;
+    display: flex;
+    justify-content: space-between;
+  }
+
+  footer a {
+    color: var(--muted);
+    text-decoration: none;
+  }
+
+  footer a:hover { color: var(--ink); }
+
+  /* === Responsive === */
+  @media (max-width: 640px) {
+    .features { grid-template-columns: 1fr; }
+    .feature:nth-child(odd) { border-right: none; }
+    .feature { border-bottom: 1px solid var(--rule); }
+    .feature:last-child { border-bottom: none; }
+    .wf-row { grid-template-columns: 100px 1fr 60px; }
+    .wf-label { font-size: 0.65rem; }
+    .stats { grid-template-columns: repeat(2, 1fr); }
+    .cta-bar { flex-direction: column; align-items: flex-start; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<header class="header">
+  <h1>Trace<span>Lite</span></h1>
+  <p>Distributed tracing from scratch. Zero dependencies. 193 tests. Python only.</p>
+</header>
+
+<!-- Section 1: Quick start code -->
+<section class="frame-section">
+  <p class="frame-caption"><strong>Set up a tracer.</strong> Three lines, no config files.</p>
+  <div class="frame">
+    <div class="frame-bar">
+      <div class="frame-dot"></div>
+      <div class="frame-dot"></div>
+      <div class="frame-dot"></div>
+      <span class="tab">app.py</span>
+    </div>
+    <div class="frame-body">
+<pre><span class="kw">from</span> tracelite.tracer <span class="kw">import</span> TracerProvider
+<span class="kw">from</span> tracelite.span <span class="kw">import</span> Resource, SpanKind
+<span class="kw">from</span> tracelite.processor <span class="kw">import</span> SimpleSpanProcessor
+<span class="kw">from</span> tracelite.exporter <span class="kw">import</span> ConsoleExporter
+
+provider <span class="op">=</span> <span class="fn">TracerProvider</span>(
+    resource<span class="op">=</span><span class="fn">Resource</span>(attributes<span class="op">=</span>{<span class="str">"service.name"</span>: <span class="str">"my-api"</span>})
+)
+provider.<span class="fn">add_processor</span>(<span class="fn">SimpleSpanProcessor</span>(<span class="fn">ConsoleExporter</span>()))
+tracer <span class="op">=</span> provider.<span class="fn">get_tracer</span>()
+
+<span class="kw">with</span> tracer.<span class="fn">start_span</span>(<span class="str">"GET /users"</span>, kind<span class="op">=</span>SpanKind.SERVER) <span class="kw">as</span> span:
+    span.<span class="fn">set_attribute</span>(<span class="str">"http.method"</span>, <span class="str">"GET"</span>)
+
+    <span class="kw">with</span> tracer.<span class="fn">start_span</span>(<span class="str">"fetch_from_db"</span>) <span class="kw">as</span> db:
+        db.<span class="fn">set_attribute</span>(<span class="str">"db.system"</span>, <span class="str">"postgresql"</span>)
+        <span class="cm"># ...your query runs here...</span>
+
+    span.<span class="fn">set_attribute</span>(<span class="str">"http.status_code"</span>, <span class="num">200</span>)</pre>
+    </div>
+  </div>
+</section>
+
+<!-- Section 2: Waterfall output -->
+<section class="frame-section">
+  <p class="frame-caption"><strong>See the trace.</strong> Waterfall view renders in the terminal or the built-in dashboard.</p>
+  <div class="frame">
+    <div class="frame-bar">
+      <div class="frame-dot"></div>
+      <div class="frame-dot"></div>
+      <div class="frame-dot"></div>
+      <span class="tab">trace output</span>
+    </div>
+    <div class="frame-body">
+      <div class="waterfall">
+        <div class="wf-row">
+          <span class="wf-label">gateway › GET /api/users</span>
+          <div class="wf-bar-container"><div class="wf-bar svc-gateway" style="left:0%;width:100%"></div></div>
+          <span class="wf-dur">245ms</span>
+        </div>
+        <div class="wf-row">
+          <span class="wf-label">gateway › auth_middleware</span>
+          <div class="wf-bar-container"><div class="wf-bar svc-gateway" style="left:1%;width:8%"></div></div>
+          <span class="wf-dur">18ms</span>
+        </div>
+        <div class="wf-row">
+          <span class="wf-label">gateway › rate_limiter</span>
+          <div class="wf-bar-container"><div class="wf-bar svc-gateway" style="left:9%;width:3%"></div></div>
+          <span class="wf-dur">6ms</span>
+        </div>
+        <div class="wf-row">
+          <span class="wf-label">user-svc › GET /internal/users</span>
+          <div class="wf-bar-container"><div class="wf-bar svc-user" style="left:13%;width:82%"></div></div>
+          <span class="wf-dur">198ms</span>
+        </div>
+        <div class="wf-row">
+          <span class="wf-label">user-svc › check_cache</span>
+          <div class="wf-bar-container"><div class="wf-bar svc-user" style="left:14%;width:4%"></div></div>
+          <span class="wf-dur">9ms</span>
+        </div>
+        <div class="wf-row">
+          <span class="wf-label">database › SELECT users</span>
+          <div class="wf-bar-container"><div class="wf-bar svc-db" style="left:19%;width:71%"></div></div>
+          <span class="wf-dur">172ms</span>
+        </div>
+        <div class="wf-row">
+          <span class="wf-label">gateway › serialize</span>
+          <div class="wf-bar-container"><div class="wf-bar svc-gateway" style="left:93%;width:5%"></div></div>
+          <span class="wf-dur">12ms</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Section 3: Cross-service propagation -->
+<section class="frame-section">
+  <p class="frame-caption"><strong>Propagate context across services.</strong> W3C Trace Context headers link spans into a single trace.</p>
+  <div class="frame">
+    <div class="frame-bar">
+      <div class="frame-dot"></div>
+      <div class="frame-dot"></div>
+      <div class="frame-dot"></div>
+      <span class="tab">propagation.py</span>
+    </div>
+    <div class="frame-body">
+<pre><span class="kw">from</span> tracelite.propagator <span class="kw">import</span> W3CTraceContextPropagator
+<span class="kw">from</span> tracelite.context <span class="kw">import</span> SpanContext
+
+propagator <span class="op">=</span> <span class="fn">W3CTraceContextPropagator</span>()
+
+<span class="cm"># Service A: inject into outgoing request</span>
+<span class="kw">with</span> tracer.<span class="fn">start_span</span>(<span class="str">"call-service-b"</span>, kind<span class="op">=</span>SpanKind.CLIENT) <span class="kw">as</span> span:
+    headers <span class="op">=</span> {}
+    ctx <span class="op">=</span> <span class="fn">SpanContext</span>(span.trace_id, span.span_id, trace_flags<span class="op">=</span><span class="num">1</span>)
+    propagator.<span class="fn">inject</span>(ctx, headers)
+    <span class="cm"># → {"traceparent": "00-4bf92f...-00f067...-01"}</span>
+
+<span class="cm"># Service B: extract from incoming request</span>
+parent <span class="op">=</span> propagator.<span class="fn">extract</span>(incoming_headers)
+<span class="kw">with</span> tracer.<span class="fn">start_span</span>(<span class="str">"handle-request"</span>, parent<span class="op">=</span>parent) <span class="kw">as</span> span:
+    <span class="cm"># Same trace_id, linked as child span</span>
+    <span class="kw">pass</span></pre>
+    </div>
+  </div>
+</section>
+
+<!-- Service graph -->
+<section class="frame-section">
+  <p class="frame-caption"><strong>Map your services.</strong> Auto-generated dependency graph with edge metrics.</p>
+  <div class="frame">
+    <div class="frame-bar">
+      <div class="frame-dot"></div>
+      <div class="frame-dot"></div>
+      <div class="frame-dot"></div>
+      <span class="tab">service map</span>
+    </div>
+    <div class="frame-body">
+      <div class="graph-container">
+        <div class="graph-node">
+          <div class="graph-box">
+            gateway
+            <small>142 spans</small>
+          </div>
+        </div>
+        <span class="graph-arrow">──→</span>
+        <div class="graph-node">
+          <div class="graph-box">
+            user-api
+            <small>89 spans · 2% err</small>
+          </div>
+        </div>
+        <span class="graph-arrow">──→</span>
+        <div class="graph-node">
+          <div class="graph-box">
+            database
+            <small>89 spans · p99 45ms</small>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Stats -->
+<section class="frame-section">
+  <div class="stats">
+    <div class="stat">
+      <div class="stat-value">0<span class="unit">deps</span></div>
+      <div class="stat-label">External dependencies</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value">193<span class="unit">✓</span></div>
+      <div class="stat-label">Tests passing</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value">18<span class="unit">modules</span></div>
+      <div class="stat-label">Core components</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value">5.5k<span class="unit">lines</span></div>
+      <div class="stat-label">Python, no filler</div>
+    </div>
+  </div>
+</section>
+
+<!-- Feature grid -->
+<section class="frame-section">
+  <p class="frame-caption"><strong>What's inside.</strong></p>
+  <div class="features">
+    <div class="feature">
+      <div class="feature-name">W3C Trace Context</div>
+      <div class="feature-desc">traceparent / tracestate header propagation across service boundaries</div>
+    </div>
+    <div class="feature">
+      <div class="feature-name">5 Sampling Strategies</div>
+      <div class="feature-desc">AlwaysOn, AlwaysOff, Probabilistic, RateLimiting, ParentBased</div>
+    </div>
+    <div class="feature">
+      <div class="feature-name">SQLite Storage</div>
+      <div class="feature-desc">WAL-mode persistence with indexed queries, retention, and compaction</div>
+    </div>
+    <div class="feature">
+      <div class="feature-name">RED Metrics</div>
+      <div class="feature-desc">Rate, Errors, Duration with p50/p90/p95/p99 percentiles</div>
+    </div>
+    <div class="feature">
+      <div class="feature-name">Critical Path Analysis</div>
+      <div class="feature-desc">Find the span chain determining end-to-end latency</div>
+    </div>
+    <div class="feature">
+      <div class="feature-name">@trace Decorator</div>
+      <div class="feature-desc">Zero-boilerplate instrumentation with argument recording</div>
+    </div>
+    <div class="feature">
+      <div class="feature-name">WSGI Middleware</div>
+      <div class="feature-desc">Drop-in request tracing for any WSGI application</div>
+    </div>
+    <div class="feature">
+      <div class="feature-name">HTML Dashboard</div>
+      <div class="feature-desc">Self-contained dashboard with trace list, waterfall, and service map</div>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<div class="cta-bar">
+  <a href="https://github.com/hajirufai/tracelite" class="cta-btn">View on GitHub →</a>
+  <a href="https://github.com/hajirufai/tracelite#quick-start" class="cta-secondary">Read the docs</a>
+</div>
+
+<footer>
+  <span>TraceLite · Built by <a href="https://github.com/hajirufai">Haji Rufai</a></span>
+  <span>MIT License</span>
+</footer>
+
+</body>
+</html>
